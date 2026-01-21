@@ -2,6 +2,7 @@
 
 # Script to search and delete Amazon SageMaker Notebook instances across all enabled regions
 # Uses AWS CLI to manage SageMaker notebooks
+# NOTE: This script assumes all notebook instances are already stopped
 
 set -e
 
@@ -50,42 +51,6 @@ get_enabled_regions() {
 list_notebooks_in_region() {
 	local region=$1
 	aws sagemaker list-notebook-instances --region "$region" --query "NotebookInstances[].NotebookInstanceName" --output text 2>/dev/null || echo ""
-}
-
-# Function to get notebook instance status
-get_notebook_status() {
-	local region=$1
-	local notebook_name=$2
-	aws sagemaker describe-notebook-instance --region "$region" --notebook-instance-name "$notebook_name" --query "NotebookInstanceStatus" --output text 2>/dev/null || echo "Unknown"
-}
-
-# Function to stop a notebook instance
-stop_notebook() {
-	local region=$1
-	local notebook_name=$2
-	echo "  → Stopping notebook instance: $notebook_name"
-	aws sagemaker stop-notebook-instance --region "$region" --notebook-instance-name "$notebook_name" 2>/dev/null
-
-	# Wait for the notebook to stop (max 5 minutes)
-	local max_wait=60  # 60 * 5 seconds = 5 minutes
-	local count=0
-	while [ $count -lt $max_wait ]; do
-		local status=$(get_notebook_status "$region" "$notebook_name")
-		if [ "$status" = "Stopped" ]; then
-			echo "  ✓ Notebook stopped: $notebook_name"
-			return 0
-		elif [ "$status" = "Failed" ]; then
-			echo "  ✗ Notebook failed to stop: $notebook_name"
-			return 1
-		fi
-		sleep 5
-		count=$((count + 1))
-		if [ $((count % 6)) -eq 0 ]; then
-			echo "    (Still waiting for $notebook_name to stop... status: $status)"
-		fi
-	done
-	echo "  ⚠ Timeout waiting for notebook to stop: $notebook_name"
-	return 1
 }
 
 # Function to delete a notebook instance
@@ -144,39 +109,11 @@ for region in $REGIONS; do
 	for notebook in $notebook_array; do
 		echo "  Processing: $notebook"
 
-		# Get current status
-		status=$(get_notebook_status "$region" "$notebook")
-		echo "    Current status: $status"
-
-		# Stop the notebook if it's not already stopped
-		if [ "$status" != "Stopped" ] && [ "$status" != "Stopping" ]; then
-			if ! stop_notebook "$region" "$notebook"; then
-				echo "  ⚠ Skipping deletion due to stop failure: $notebook"
-				FAILED_DELETIONS=$((FAILED_DELETIONS + 1))
-				continue
-			fi
-		elif [ "$status" = "Stopping" ]; then
-			echo "  → Notebook is already stopping, waiting for it to stop..."
-			# Wait for it to finish stopping
-			local max_wait=60
-			local count=0
-			while [ $count -lt $max_wait ]; do
-				status=$(get_notebook_status "$region" "$notebook")
-				if [ "$status" = "Stopped" ]; then
-					echo "  ✓ Notebook stopped: $notebook"
-					break
-				fi
-				sleep 5
-				count=$((count + 1))
-			done
-		else
-			echo "  ✓ Notebook already stopped: $notebook"
-		fi
-
-		# Delete the notebook
+		# Delete the notebook (assumes it's already stopped)
 		if delete_notebook "$region" "$notebook"; then
 			DELETED_NOTEBOOKS=$((DELETED_NOTEBOOKS + 1))
 		else
+			echo "  ⚠ Note: If deletion failed because the notebook is not stopped, stop it first and retry"
 			FAILED_DELETIONS=$((FAILED_DELETIONS + 1))
 		fi
 	done

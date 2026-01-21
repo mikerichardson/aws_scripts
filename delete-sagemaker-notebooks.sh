@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-# Script to search and delete Amazon SageMaker Notebook instances across all opt-in regions
+# Script to search and delete Amazon SageMaker Notebook instances across all enabled regions
 # Uses AWS CLI to manage SageMaker notebooks
 
 set -e
@@ -41,9 +41,9 @@ echo "Running as: $USER_ARN"
 echo "Account ID: $ACCOUNT_ID"
 echo
 
-# Function to get all regions (including opt-in regions)
-get_all_regions() {
-	aws ec2 describe-regions --all-regions --query "Regions[].RegionName" --output text
+# Function to get only enabled regions (excludes non-opted-in regions)
+get_enabled_regions() {
+	aws ec2 describe-regions --all-regions --query "Regions[?OptInStatus=='opt-in-not-required' || OptInStatus=='opted-in'].RegionName" --output text
 }
 
 # Function to list SageMaker notebook instances in a region
@@ -103,8 +103,8 @@ delete_notebook() {
 }
 
 # Main execution
-echo "Retrieving all AWS regions (including opt-in regions)..."
-REGIONS=$(get_all_regions)
+echo "Retrieving enabled AWS regions..."
+REGIONS=$(get_enabled_regions)
 
 if [ -z "$REGIONS" ]; then
 	echo "ERROR: Could not retrieve AWS regions. Please check your AWS CLI configuration."
@@ -112,7 +112,7 @@ if [ -z "$REGIONS" ]; then
 fi
 
 REGION_COUNT=$(echo "$REGIONS" | wc -w)
-echo "Found $REGION_COUNT regions to scan"
+echo "Found $REGION_COUNT enabled region(s) to scan"
 echo
 
 # Track statistics
